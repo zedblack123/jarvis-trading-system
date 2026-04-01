@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>贾维斯量化交易系统</title>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #1a1a2e;
+            color: #eee;
+            min-height: 100vh;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px 30px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        }
+        .header h1 { font-size: 24px; margin-bottom: 5px; }
+        .header p { color: rgba(255,255,255,0.8); font-size: 14px; }
+        
+        .container { max-width: 1400px; margin: 0 auto; padding: 20px; }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+        
+        .card-title {
+            font-size: 14px;
+            color: #888;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        
+        /* 大盘指数 */
+        .market-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .market-item:last-child { border-bottom: none; }
+        .market-name { font-size: 16px; }
+        .market-price { font-size: 20px; font-weight: bold; }
+        .market-change { 
+            font-size: 14px;
+            padding: 4px 10px;
+            border-radius: 4px;
+        }
+        .up { color: #f00; background: rgba(255,0,0,0.1); }
+        .down { color: #0f0; background: rgba(0,255,0,0.1); }
+        
+        /* K线图 */
+        .chart-container {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        /* 股票搜索 */
+        .search-box {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .search-input {
+            flex: 1;
+            padding: 12px 20px;
+            border: 1px solid #333;
+            border-radius: 8px;
+            background: #0f3460;
+            color: #fff;
+            font-size: 16px;
+        }
+        .search-btn {
+            padding: 12px 30px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            border: none;
+            border-radius: 8px;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .search-btn:hover { transform: scale(1.05); }
+        
+        /* 选股列表 */
+        .stock-list {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        .stock-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #2a2a4a;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .stock-item:hover { background: #1f3460; }
+        .stock-rank {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #667eea;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+        .stock-info { flex: 1; margin-left: 15px; }
+        .stock-name { font-size: 16px; font-weight: bold; }
+        .stock-code { font-size: 12px; color: #888; }
+        .stock-score {
+            text-align: right;
+        }
+        .score-value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+        .score-label { font-size: 12px; color: #888; }
+        
+        /* 指标卡片 */
+        .indicator {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 15px;
+        }
+        .indicator-item {
+            background: #0f3460;
+            padding: 10px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        .indicator-label { font-size: 12px; color: #888; }
+        .indicator-value { font-size: 16px; font-weight: bold; }
+        
+        /* 涨跌显示 */
+        .green { color: #00ff00; }
+        .red { color: #ff0000; }
+        
+        /* 响应式 */
+        @media (max-width: 768px) {
+            .grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🤖 贾维斯量化交易系统</h1>
+        <p>为人山先生服务 | A股智能投研平台</p>
+    </div>
+    
+    <div class="container">
+        <!-- 搜索框 -->
+        <div class="search-box">
+            <input type="text" class="search-input" id="stockCode" placeholder="输入股票代码，如: 002202">
+            <button class="search-btn" onclick="searchStock()">🔍 分析</button>
+        </div>
+        
+        <!-- K线图 -->
+        <div class="chart-container">
+            <div id="klineChart" style="height: 400px;"></div>
+            <div class="indicator">
+                <div class="indicator-item">
+                    <div class="indicator-label">MACD</div>
+                    <div class="indicator-value" id="macdValue">-</div>
+                </div>
+                <div class="indicator-item">
+                    <div class="indicator-label">KDJ</div>
+                    <div class="indicator-value" id="kdjValue">-</div>
+                </div>
+                <div class="indicator-item">
+                    <div class="indicator-label">RSI</div>
+                    <div class="indicator-value" id="rsiValue">-</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="grid">
+            <!-- 大盘指数 -->
+            <div class="card">
+                <div class="card-title">📊 大盘指数</div>
+                <div id="marketList">
+                    <div class="market-item">
+                        <span class="market-name">加载中...</span>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 当前股票 -->
+            <div class="card">
+                <div class="card-title">📈 当前股票</div>
+                <div id="currentStock">
+                    <div style="text-align: center; padding: 30px; color: #888;">
+                        输入股票代码查看详情
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 热门选股 -->
+        <div class="card">
+            <div class="card-title">🔥 热门选股 TOP10</div>
+            <div class="stock-list" id="stockList">
+                <div style="text-align: center; padding: 30px; color: #888;">
+                    加载中...
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // 加载大盘指数
+        function loadMarket() {
+            fetch('/api/market')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.code === 0) {
+                        let html = '';
+                        data.data.forEach(item => {
+                            const cls = item.change_pct > 0 ? 'up' : 'down';
+                            const sign = item.change_pct > 0 ? '+' : '';
+                            html += `
+                                <div class="market-item">
+                                    <span class="market-name">${item.name}</span>
+                                    <span class="market-price">${item.price.toFixed(2)}</span>
+                                    <span class="market-change ${cls}">${sign}${item.change_pct.toFixed(2)}%</span>
+                                </div>
+                            `;
+                        });
+                        document.getElementById('marketList').innerHTML = html;
+                    }
+                });
+        }
+        
+        // 加载热门选股
+        function loadHotStocks() {
+            fetch('/api/hot_stocks')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.code === 0) {
+                        let html = '';
+                        data.data.forEach((item, i) => {
+                            const changeCls = item.change_pct > 0 ? 'green' : 'red';
+                            const signalColor = item.signal === 'buy' ? 'green' : (item.signal === 'sell' ? 'red' : '#888');
+                            html += `
+                                <div class="stock-item" onclick="selectStock('${item.code}')">
+                                    <div class="stock-rank">${i + 1}</div>
+                                    <div class="stock-info">
+                                        <div class="stock-name">${item.name}</div>
+                                        <div class="stock-code">${item.code}</div>
+                                    </div>
+                                    <div style="text-align: center;">
+                                        <div class="${changeCls}">${item.change_pct > 0 ? '+' : ''}${item.change_pct.toFixed(2)}%</div>
+                                        <div style="font-size: 12px; color: ${signalColor};">${item.signal.toUpperCase()}</div>
+                                    </div>
+                                    <div class="stock-score">
+                                        <div class="score-value">${item.score}</div>
+                                        <div class="score-label">综合评分</div>
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        document.getElementById('stockList').innerHTML = html;
+                    }
+                });
+        }
+        
+        // 选择股票
+        function selectStock(code) {
+            document.getElementById('stockCode').value = code;
+            searchStock();
+        }
+        
+        // 搜索股票
+        function searchStock() {
+            const code = document.getElementById('stockCode').value.trim();
+            if (!code) return;
+            
+            fetch(`/api/stock/${code}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.code === 0) {
+                        drawKline(data.data);
+                        updateIndicators(data.data.indicators);
+                        updateCurrentStock(data.data.quote);
+                    } else {
+                        alert('未找到该股票');
+                    }
+                });
+        }
+        
+        // 绘制K线图
+        function drawKline(data) {
+            const kline = data.kline;
+            const dates = kline.map(k => k.date);
+            const opens = kline.map(k => k.open);
+            const highs = kline.map(k => k.high);
+            const lows = kline.map(k => k.low);
+            const closes = kline.map(k => k.close);
+            
+            const trace = {
+                x: dates,
+                open: opens,
+                high: highs,
+                low: lows,
+                close: closes,
+                type: 'candlestick',
+                name: 'K线',
+                increasing: { line: { color: '#f00' } },
+                decreasing: { line: { color: '#0f0' } }
+            };
+            
+            const layout = {
+                paper_bgcolor: '#16213e',
+                plot_bgcolor: '#16213e',
+                font: { color: '#eee' },
+                height: 400,
+                xaxis: { gridcolor: '#333', showgrid: true },
+                yaxis: { gridcolor: '#333', showgrid: true },
+                margin: { l: 50, r: 20, t: 30, b: 30 }
+            };
+            
+            Plotly.newPlot('klineChart', [trace], layout);
+        }
+        
+        // 更新指标
+        function updateIndicators(ind) {
+            if (ind.macd) {
+                document.getElementById('macdValue').textContent = 
+                    `DIF:${ind.macd.macd?.toFixed(2) || '-'} DEA:${ind.macd.signal?.toFixed(2) || '-'}`;
+            }
+            if (ind.kdj) {
+                document.getElementById('kdjValue').textContent = 
+                    `K:${ind.kdj.k?.toFixed(1) || '-'} D:${ind.kdj.d?.toFixed(1) || '-'}`;
+            }
+            if (ind.rsi) {
+                const rsiVal = ind.rsi.toFixed(1);
+                const color = rsiVal > 70 ? 'red' : (rsiVal < 30 ? 'green' : '#eee');
+                document.getElementById('rsiValue').innerHTML = `<span style="color:${color}">${rsiVal}</span>`;
+            }
+        }
+        
+        // 更新当前股票信息
+        function updateCurrentStock(quote) {
+            if (!quote) return;
+            const changeCls = quote.change_pct > 0 ? 'green' : 'red';
+            const sign = quote.change_pct > 0 ? '+' : '';
+            document.getElementById('currentStock').innerHTML = `
+                <div style="text-align: center;">
+                    <div style="font-size: 32px; font-weight: bold; margin-bottom: 10px;">
+                        ${quote.name || ''}
+                    </div>
+                    <div style="font-size: 48px; font-weight: bold; ${changeCls}">
+                        ${quote.current?.toFixed(2) || '-'}
+                    </div>
+                    <div style="font-size: 24px; margin-top: 10px;" class="${changeCls}">
+                        ${sign}${quote.change_pct?.toFixed(2) || '0.00'}%
+                    </div>
+                    <div style="margin-top: 20px; display: grid; grid-template-columns: 1fr 1fr; gap: 10px; text-align: left;">
+                        <div>开盘: <span class="${quote.open > quote.last_close ? 'green' : 'red'}">${quote.open?.toFixed(2)}</span></div>
+                        <div>最高: <span class="green">${quote.high?.toFixed(2)}</span></div>
+                        <div>最低: <span class="red">${quote.low?.toFixed(2)}</span></div>
+                        <div>昨收: ${quote.last_close?.toFixed(2)}</div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 初始化
+        loadMarket();
+        loadHotStocks();
+        
+        // 每30秒刷新
+        setInterval(loadMarket, 30000);
+        setInterval(loadHotStocks, 60000);
+    </script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+{
+  "trading_agents_integration": {
+    "enabled": true,
+    "use_chinese_output": true,
+    "llm_provider": "openai",
+    "deep_think_llm": "gpt-4",
+    "quick_think_llm": "gpt-3.5-turbo",
+    "debug": false,
+    "selected_analysts": ["market", "social", "news", "fundamentals"],
+    "api_keys": {
+      "openai": "your-openai-api-key-here",
+      "anthropic": "your-anthropic-api-key-here",
+      "google": "your-google-api-key-here"
+    }
+  },
+  "integration_settings": {
+    "combine_decisions": true,
+    "confidence_threshold": 0.7,
+    "max_stocks_per_batch": 10,
+    "cache_results": true,
+    "cache_duration_hours": 24
+  },
+  "reporting": {
+    "generate_detailed_reports": true,
+    "include_agent_reasoning": true,
+    "format": "markdown",
+    "output_path": "./reports/trading_agents"
+  }
+}

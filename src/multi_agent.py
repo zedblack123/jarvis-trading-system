@@ -4,12 +4,21 @@
 
 DeepSeek: 选股、策略、推理、代码
 MiniMax: 日常对话、信息推送
+
+改进版本：集成工具系统、钩子系统、分析追踪
 """
 
 import json
 import requests
+import time
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+
+# 导入新模块
+from tools import ToolRegistry, StockDataTool, TechnicalAnalysisTool
+from hooks import get_hook_manager
+from analytics import get_analytics, track_agent_performance
+
 
 # ==================== 模型配置 ====================
 
@@ -83,9 +92,22 @@ class DeepSeekClient:
         self.api_key = api_key or ModelConfig.DEEPSEEK_API_KEY
         self.base_url = ModelConfig.DEEPSEEK_BASE_URL
         self.model = ModelConfig.DEEPSEEK_MODEL
+        self.hook_manager = get_hook_manager()
     
+    @track_agent_performance("deepseek_client")
     def chat(self, messages: List[Dict], system: str = None) -> str:
         """发送聊天请求"""
+        # 执行钩子：模型调用前
+        context = {
+            "stage": "before_model_call",
+            "model": "deepseek",
+            "messages": messages,
+            "system": system
+        }
+        
+        if not self.hook_manager.execute("before_model_call", context):
+            return "钩子中断了模型调用"
+        
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -110,8 +132,26 @@ class DeepSeekClient:
                 timeout=60
             )
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
+            result = response.json()["choices"][0]["message"]["content"]
+            
+            # 执行钩子：模型调用后
+            context.update({
+                "stage": "after_model_call",
+                "response": result,
+                "success": True
+            })
+            self.hook_manager.execute("after_model_call", context)
+            
+            return result
         except Exception as e:
+            # 执行钩子：错误处理
+            context.update({
+                "stage": "on_error",
+                "error": str(e),
+                "success": False
+            })
+            self.hook_manager.execute("on_error", context)
+            
             return f"DeepSeek API 调用失败: {str(e)}"
 
 
@@ -124,9 +164,22 @@ class MiniMaxClient:
         self.api_key = api_key or ModelConfig.MINIMAX_API_KEY
         self.base_url = ModelConfig.MINIMAX_BASE_URL
         self.model = ModelConfig.MINIMAX_MODEL
+        self.hook_manager = get_hook_manager()
     
+    @track_agent_performance("minimax_client")
     def chat(self, messages: List[Dict], system: str = None) -> str:
         """发送聊天请求"""
+        # 执行钩子：模型调用前
+        context = {
+            "stage": "before_model_call",
+            "model": "minimax",
+            "messages": messages,
+            "system": system
+        }
+        
+        if not self.hook_manager.execute("before_model_call", context):
+            return "钩子中断了模型调用"
+        
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json"
@@ -151,8 +204,26 @@ class MiniMaxClient:
                 timeout=60
             )
             response.raise_for_status()
-            return response.json()["choices"][0]["message"]["content"]
+            result = response.json()["choices"][0]["message"]["content"]
+            
+            # 执行钩子：模型调用后
+            context.update({
+                "stage": "after_model_call",
+                "response": result,
+                "success": True
+            })
+            self.hook_manager.execute("after_model_call", context)
+            
+            return result
         except Exception as e:
+            # 执行钩子：错误处理
+            context.update({
+                "stage": "on_error",
+                "error": str(e),
+                "success": False
+            })
+            self.hook_manager.execute("on_error", context)
+            
             return f"MiniMax API 调用失败: {str(e)}"
 
 
@@ -198,7 +269,30 @@ class JarvisMultiAgent:
         self.deepseek = DeepSeekClient(deepseek_key)
         self.minimax = MiniMaxClient(minimax_key)
         self.model_router = ModelRouter()
+        
+        # 集成工具系统
+        self.tool_registry = ToolRegistry.get_instance()
+        self._init_tools()
+        
+        # 集成钩子系统
+        self.hook_manager = get_hook_manager()
+        
+        # 集成分析系统
+        self.analytics = get_analytics()
     
+    def _init_tools(self):
+        """初始化工具"""
+        # 注册股票数据工具
+        stock_tool = StockDataTool()
+        self.tool_registry.register(stock_tool)
+        
+        # 注册技术分析工具
+        tech_tool = TechnicalAnalysisTool()
+        self.tool_registry.register(tech_tool)
+        
+        print(f"🛠️ 已注册工具: {self.tool_registry.list_tool_names()}")
+    
+    @track_agent_performance("jarvis_multi_agent")
     def analyze_stock(self, stock_code: str, stock_name: str = None) -> Dict:
         """
         综合分析一只股票
@@ -210,40 +304,127 @@ class JarvisMultiAgent:
         print(f"开始分析: {name} ({stock_code})")
         print(f"{'='*60}\n")
         
-        # 1. 基本面分析 (DeepSeek)
-        print("[1/5] 基本面分析...")
-        fundamental = self._fundamental_analysis(stock_code, name)
-        
-        # 2. 技术面分析 (DeepSeek)
-        print("[2/5] 技术面分析...")
-        technical = self._technical_analysis(stock_code, name)
-        
-        # 3. 情绪面分析 (MiniMax)
-        print("[3/5] 情绪面分析...")
-        sentiment = self._sentiment_analysis(stock_code, name)
-        
-        # 4. 风险评估 (DeepSeek)
-        print("[4/5] 风险评估...")
-        risk = self._risk_assessment(stock_code, name, fundamental, technical, sentiment)
-        
-        # 5. 交易决策 (DeepSeek)
-        print("[5/5] 综合决策...")
-        decision = self._trading_decision(stock_code, name, fundamental, technical, sentiment, risk)
-        
-        return {
+        # 执行钩子：分析前
+        context = {
+            "stage": "pre_analysis",
             "stock_code": stock_code,
             "stock_name": name,
-            "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
-            "fundamental": fundamental,
-            "technical": technical,
-            "sentiment": sentiment,
-            "risk": risk,
-            "decision": decision
+            "start_time": time.time()
         }
+        
+        if not self.hook_manager.execute("pre_analysis", context):
+            return {"error": "分析被钩子中断"}
+        
+        try:
+            # 1. 使用工具获取股票数据
+            print("[1/6] 获取股票数据...")
+            stock_data = self._get_stock_data(stock_code)
+            
+            # 2. 基本面分析 (DeepSeek)
+            print("[2/6] 基本面分析...")
+            fundamental = self._fundamental_analysis(stock_code, name, stock_data)
+            
+            # 3. 技术面分析 (DeepSeek)
+            print("[3/6] 技术面分析...")
+            technical = self._technical_analysis(stock_code, name, stock_data)
+            
+            # 4. 情绪面分析 (MiniMax)
+            print("[4/6] 情绪面分析...")
+            sentiment = self._sentiment_analysis(stock_code, name)
+            
+            # 5. 风险评估 (DeepSeek)
+            print("[5/6] 风险评估...")
+            risk = self._risk_assessment(stock_code, name, fundamental, technical, sentiment)
+            
+            # 6. 交易决策 (DeepSeek)
+            print("[6/6] 综合决策...")
+            decision = self._trading_decision(stock_code, name, fundamental, technical, sentiment, risk)
+            
+            # 执行钩子：分析后
+            context.update({
+                "stage": "post_analysis",
+                "analysis_results": {
+                    "fundamental": fundamental[:100],
+                    "technical": technical[:100],
+                    "sentiment": sentiment[:100],
+                    "risk": risk[:100],
+                    "decision": decision[:100]
+                },
+                "end_time": time.time(),
+                "success": True
+            })
+            self.hook_manager.execute("post_analysis", context)
+            
+            return {
+                "stock_code": stock_code,
+                "stock_name": name,
+                "analysis_time": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "fundamental": fundamental,
+                "technical": technical,
+                "sentiment": sentiment,
+                "risk": risk,
+                "decision": decision,
+                "stock_data_summary": stock_data.get("summary", {}) if isinstance(stock_data, dict) else {}
+            }
+            
+        except Exception as e:
+            # 执行钩子：错误处理
+            context.update({
+                "stage": "on_error",
+                "error": str(e),
+                "success": False
+            })
+            self.hook_manager.execute("on_error", context)
+            
+            return {
+                "stock_code": stock_code,
+                "stock_name": name,
+                "error": f"分析失败: {str(e)}"
+            }
     
-    def _fundamental_analysis(self, code: str, name: str) -> str:
+    def _get_stock_data(self, stock_code: str) -> Dict:
+        """使用工具获取股票数据"""
+        try:
+            # 执行钩子：工具执行前
+            context = {
+                "stage": "before_tool_execute",
+                "tool_name": "stock_data",
+                "stock_code": stock_code
+            }
+            self.hook_manager.execute("before_tool_execute", context)
+            
+            # 调用股票数据工具
+            result = self.tool_registry.execute_tool(
+                "stock_data",
+                stock_code=stock_code,
+                data_type="history",
+                period="daily"
+            )
+            
+            # 执行钩子：工具执行后
+            context.update({
+                "stage": "after_tool_execute",
+                "result": result,
+                "success": "error" not in result
+            })
+            self.hook_manager.execute("after_tool_execute", context)
+            
+            return result
+        except Exception as e:
+            return {"error": f"获取股票数据失败: {str(e)}"}
+    
+    @track_agent_performance("fundamental_agent")
+    def _fundamental_analysis(self, code: str, name: str, stock_data: Dict = None) -> str:
         """基本面分析"""
-        prompt = f"""分析 {name} ({code}) 的基本面状况：
+        # 构建提示词，包含工具获取的数据
+        data_context = ""
+        if stock_data and "error" not in stock_data:
+            if "latest_price" in stock_data:
+                data_context = f"\n当前价格: {stock_data['latest_price']}"
+            if "latest_date" in stock_data:
+                data_context += f"\n数据日期: {stock_data['latest_date']}"
+        
+        prompt = f"""分析 {name} ({code}) 的基本面状况：{data_context}
         
 请从以下维度进行分析：
 1. 所处行业及行业地位
@@ -260,9 +441,38 @@ class JarvisMultiAgent:
         )
         return response
     
-    def _technical_analysis(self, code: str, name: str) -> str:
+    @track_agent_performance("technical_agent")
+    def _technical_analysis(self, code: str, name: str, stock_data: Dict = None) -> str:
         """技术面分析"""
-        prompt = f"""分析 {name} ({code}) 的技术面状况：
+        # 使用技术分析工具
+        tech_indicators = {}
+        if stock_data and "error" not in stock_data and "data" in stock_data:
+            try:
+                # 提取价格数据用于技术分析
+                price_data = stock_data.get("data", [])
+                if price_data:
+                    tech_result = self.tool_registry.execute_tool(
+                        "technical",
+                        stock_code=code,
+                        price_data=price_data,
+                        indicators=["MA", "MACD", "KDJ", "RSI", "BOLL"]
+                    )
+                    
+                    if "error" not in tech_result:
+                        tech_indicators = tech_result.get("indicator_values", {})
+                        signals = tech_result.get("signals", {})
+            except Exception as e:
+                print(f"⚠️ 技术分析工具失败: {str(e)}")
+        
+        # 构建提示词
+        tech_context = ""
+        if tech_indicators:
+            tech_context = "\n技术指标数据："
+            for key, value in tech_indicators.items():
+                if value is not None:
+                    tech_context += f"\n  • {key}: {value:.2f}" if isinstance(value, (int, float)) else f"\n  • {key}: {value}"
+        
+        prompt = f"""分析 {name} ({code}) 的技术面状况：{tech_context}
 
 请从以下维度进行分析：
 1. 当前价格位置（相对历史高低点）
@@ -281,6 +491,7 @@ class JarvisMultiAgent:
         )
         return response
     
+    @track_agent_performance("sentiment_agent")
     def _sentiment_analysis(self, code: str, name: str) -> str:
         """情绪面分析"""
         prompt = f"""分析 {name} ({code}) 相关的市场情绪：
@@ -301,6 +512,7 @@ class JarvisMultiAgent:
         )
         return response
     
+    @track_agent_performance("risk_agent")
     def _risk_assessment(self, code: str, name: str, fundamental: str, technical: str, sentiment: str) -> str:
         """风险评估"""
         prompt = f"""基于以下分析，评估 {name} ({code}) 的风险：
@@ -329,9 +541,26 @@ class JarvisMultiAgent:
         )
         return response
     
+    @track_agent_performance("trader_agent")
     def _trading_decision(self, code: str, name: str, fundamental: str, technical: str, 
                           sentiment: str, risk: str) -> str:
         """交易决策"""
+        # 执行钩子：决策前
+        context = {
+            "stage": "pre_decision",
+            "stock_code": code,
+            "stock_name": name,
+            "analysis_summary": {
+                "fundamental": fundamental[:100],
+                "technical": technical[:100],
+                "sentiment": sentiment[:100],
+                "risk": risk[:100]
+            }
+        }
+        
+        if not self.hook_manager.execute("pre_decision", context):
+            return "决策被钩子中断"
+        
         prompt = f"""综合以下分析，给出 {name} ({code}) 的交易决策：
 
 【基本面分析摘要】
@@ -360,10 +589,33 @@ class JarvisMultiAgent:
             messages=[{"role": "user", "content": prompt}],
             system=self.AGENT_PROMPTS["trader"]
         )
+        
+        # 执行钩子：决策后
+        context.update({
+            "stage": "post_decision",
+            "decision": response[:100],
+            "success": True
+        })
+        self.hook_manager.execute("post_decision", context)
+        
         return response
     
     def format_report(self, result: Dict) -> str:
         """格式化分析报告"""
+        if "error" in result:
+            return f"""
+{'='*60}
+❌ 分析失败
+{'='*60}
+
+股票: {result.get('stock_name', '未知')} ({result.get('stock_code', '未知')})
+错误: {result['error']}
+
+{'='*60}
+🤵 贾维斯出品
+{'='*60}
+"""
+        
         report = f"""
 {'='*60}
 📊 贾维斯多智能体分析报告
@@ -398,10 +650,32 @@ class JarvisMultiAgent:
 {result['decision']}
 
 {'='*60}
+📊 分析统计
+{'='*60}
+工具调用: {len(self.tool_registry.list_tools())} 个工具已注册
+钩子数量: {self.hook_manager.get_hook_count()} 个钩子已注册
+
+{'='*60}
 🤵 贾维斯出品 | 仅供参考，不构成投资建议
 {'='*60}
 """
         return report
+    
+    def get_system_status(self) -> Dict:
+        """获取系统状态"""
+        return {
+            "tools": {
+                "count": len(self.tool_registry.list_tools()),
+                "names": self.tool_registry.list_tool_names()
+            },
+            "hooks": {
+                "count": self.hook_manager.get_hook_count(),
+                "stages": self.hook_manager.list_hooks()
+            },
+            "analytics": {
+                "report": self.analytics.get_report()
+            }
+        }
 
 
 # ==================== 快速选股接口 ====================
@@ -439,8 +713,9 @@ def quick_screen(stock_code: str) -> str:
 if __name__ == "__main__":
     print("""
     ╔══════════════════════════════════════════╗
-    ║     贾维斯多智能体选股系统 v1.0           ║
+    ║     贾维斯多智能体选股系统 v2.0           ║
     ║     DeepSeek + MiniMax 高低搭配          ║
+    ║     集成工具系统 + 钩子系统 + 分析追踪    ║
     ╚══════════════════════════════════════════╝
     """)
     
@@ -448,7 +723,19 @@ if __name__ == "__main__":
     ModelConfig.from_env()
     agent = JarvisMultiAgent()
     
+    # 显示系统状态
+    status = agent.get_system_status()
+    print(f"\n🛠️ 系统状态:")
+    print(f"  • 工具数量: {status['tools']['count']}")
+    print(f"  • 钩子数量: {status['hooks']['count']}")
+    
     # 测试
     test_code = "002202"  # 金风科技
+    print(f"\n🔍 开始测试分析: {test_code}")
+    
     result = agent.analyze_stock(test_code)
     print(agent.format_report(result))
+    
+    # 显示分析报告
+    print("\n📊 性能分析报告:")
+    print(agent.analytics.get_report())

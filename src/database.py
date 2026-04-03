@@ -124,6 +124,50 @@ class JarvisDB:
             )
         ''')
         
+        # 7. Agent性能分析表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS agent_analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                agent_name TEXT NOT NULL,
+                calls INTEGER DEFAULT 0,
+                errors INTEGER DEFAULT 0,
+                total_latency REAL DEFAULT 0.0,
+                avg_latency REAL DEFAULT 0.0,
+                error_rate REAL DEFAULT 0.0,
+                last_call_time TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # 8. 工具使用统计表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS tool_analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tool_name TEXT NOT NULL,
+                calls INTEGER DEFAULT 0,
+                errors INTEGER DEFAULT 0,
+                avg_execution_time REAL DEFAULT 0.0,
+                last_call_time TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
+        # 9. 钩子执行统计表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS hook_analytics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                hook_stage TEXT NOT NULL,
+                executions INTEGER DEFAULT 0,
+                failures INTEGER DEFAULT 0,
+                avg_execution_time REAL DEFAULT 0.0,
+                last_execution_time TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        
         conn.commit()
         conn.close()
         
@@ -438,6 +482,192 @@ class JarvisDB:
             r['money_flow'] = json.loads(r['money_flow'])
             result.append(r)
         return result
+    
+    # ==================== 分析统计 ====================
+    
+    def save_agent_metrics(self, agent_name: str, calls: int = 0, errors: int = 0,
+                          total_latency: float = 0.0, avg_latency: float = 0.0,
+                          error_rate: float = 0.0) -> int:
+        """保存Agent性能指标"""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        
+        # 检查是否已存在
+        cursor.execute('SELECT id FROM agent_analytics WHERE agent_name = ?', (agent_name,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # 更新现有记录
+            cursor.execute('''
+                UPDATE agent_analytics 
+                SET calls = ?, errors = ?, total_latency = ?, avg_latency = ?,
+                    error_rate = ?, last_call_time = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE agent_name = ?
+            ''', (calls, errors, total_latency, avg_latency, error_rate, agent_name))
+            agent_id = existing['id']
+        else:
+            # 插入新记录
+            cursor.execute('''
+                INSERT INTO agent_analytics 
+                (agent_name, calls, errors, total_latency, avg_latency, error_rate, last_call_time)
+                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (agent_name, calls, errors, total_latency, avg_latency, error_rate))
+            agent_id = cursor.lastrowid
+        
+        conn.commit()
+        conn.close()
+        return agent_id
+    
+    def get_agent_metrics(self, agent_name: str = None) -> List[Dict]:
+        """获取Agent性能指标"""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        
+        if agent_name:
+            cursor.execute('SELECT * FROM agent_analytics WHERE agent_name = ?', (agent_name,))
+        else:
+            cursor.execute('SELECT * FROM agent_analytics ORDER BY calls DESC')
+        
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    
+    def save_tool_metrics(self, tool_name: str, calls: int = 0, errors: int = 0,
+                         avg_execution_time: float = 0.0) -> int:
+        """保存工具使用统计"""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        
+        # 检查是否已存在
+        cursor.execute('SELECT id FROM tool_analytics WHERE tool_name = ?', (tool_name,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # 更新现有记录
+            cursor.execute('''
+                UPDATE tool_analytics 
+                SET calls = ?, errors = ?, avg_execution_time = ?,
+                    last_call_time = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE tool_name = ?
+            ''', (calls, errors, avg_execution_time, tool_name))
+            tool_id = existing['id']
+        else:
+            # 插入新记录
+            cursor.execute('''
+                INSERT INTO tool_analytics 
+                (tool_name, calls, errors, avg_execution_time, last_call_time)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (tool_name, calls, errors, avg_execution_time))
+            tool_id = cursor.lastrowid
+        
+        conn.commit()
+        conn.close()
+        return tool_id
+    
+    def get_tool_metrics(self, tool_name: str = None) -> List[Dict]:
+        """获取工具使用统计"""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        
+        if tool_name:
+            cursor.execute('SELECT * FROM tool_analytics WHERE tool_name = ?', (tool_name,))
+        else:
+            cursor.execute('SELECT * FROM tool_analytics ORDER BY calls DESC')
+        
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    
+    def save_hook_metrics(self, hook_stage: str, executions: int = 0,
+                         failures: int = 0, avg_execution_time: float = 0.0) -> int:
+        """保存钩子执行统计"""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        
+        # 检查是否已存在
+        cursor.execute('SELECT id FROM hook_analytics WHERE hook_stage = ?', (hook_stage,))
+        existing = cursor.fetchone()
+        
+        if existing:
+            # 更新现有记录
+            cursor.execute('''
+                UPDATE hook_analytics 
+                SET executions = ?, failures = ?, avg_execution_time = ?,
+                    last_execution_time = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+                WHERE hook_stage = ?
+            ''', (executions, failures, avg_execution_time, hook_stage))
+            hook_id = existing['id']
+        else:
+            # 插入新记录
+            cursor.execute('''
+                INSERT INTO hook_analytics 
+                (hook_stage, executions, failures, avg_execution_time, last_execution_time)
+                VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (hook_stage, executions, failures, avg_execution_time))
+            hook_id = cursor.lastrowid
+        
+        conn.commit()
+        conn.close()
+        return hook_id
+    
+    def get_hook_metrics(self, hook_stage: str = None) -> List[Dict]:
+        """获取钩子执行统计"""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        
+        if hook_stage:
+            cursor.execute('SELECT * FROM hook_analytics WHERE hook_stage = ?', (hook_stage,))
+        else:
+            cursor.execute('SELECT * FROM hook_analytics ORDER BY executions DESC')
+        
+        rows = cursor.fetchall()
+        conn.close()
+        return [dict(row) for row in rows]
+    
+    def get_analytics_summary(self) -> Dict:
+        """获取分析统计摘要"""
+        conn = self._get_conn()
+        cursor = conn.cursor()
+        
+        summary = {}
+        
+        # Agent统计
+        cursor.execute('SELECT COUNT(*) as count, SUM(calls) as total_calls FROM agent_analytics')
+        agent_stats = cursor.fetchone()
+        summary['agents'] = {
+            'count': agent_stats['count'] or 0,
+            'total_calls': agent_stats['total_calls'] or 0
+        }
+        
+        # 工具统计
+        cursor.execute('SELECT COUNT(*) as count, SUM(calls) as total_calls FROM tool_analytics')
+        tool_stats = cursor.fetchone()
+        summary['tools'] = {
+            'count': tool_stats['count'] or 0,
+            'total_calls': tool_stats['total_calls'] or 0
+        }
+        
+        # 钩子统计
+        cursor.execute('SELECT COUNT(*) as count, SUM(executions) as total_executions FROM hook_analytics')
+        hook_stats = cursor.fetchone()
+        summary['hooks'] = {
+            'count': hook_stats['count'] or 0,
+            'total_executions': hook_stats['total_executions'] or 0
+        }
+        
+        # 最活跃的Agent
+        cursor.execute('SELECT agent_name, calls FROM agent_analytics ORDER BY calls DESC LIMIT 3')
+        top_agents = cursor.fetchall()
+        summary['top_agents'] = [dict(row) for row in top_agents]
+        
+        # 最常用的工具
+        cursor.execute('SELECT tool_name, calls FROM tool_analytics ORDER BY calls DESC LIMIT 3')
+        top_tools = cursor.fetchall()
+        summary['top_tools'] = [dict(row) for row in top_tools]
+        
+        conn.close()
+        return summary
     
     # ==================== 统计功能 ====================
     
